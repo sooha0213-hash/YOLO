@@ -2,7 +2,9 @@
 runs/
 *.pt
 *.onnx
-
+# 단, 제출/실행용 best.pt는 포함
+!models/
+!models/best.pt
 # 2. 대용량 미디어 및 압축 파일 제외
 *.mp4
 *.zip
