@@ -1,0 +1,87 @@
+# data.yaml (YOLOv8 기본 모델 속이기 - 80개 매칭 완결판)
+path: C:/PM_ADAS_Workspace/YOLO/yolo_dataset
+train: images
+val: images
+
+nc: 80
+names:
+  0: person
+  1: bicycle
+  2: car
+  3: motorcycle_ignore
+  4: airplane_ignore
+  5: bus_ignore
+  6: train_ignore
+  7: truck
+  8: boat_ignore
+  9: traffic light_ignore
+  10: fire hydrant_ignore
+  11: stop sign_ignore
+  12: parking meter_ignore
+  13: bench_ignore
+  14: bird_ignore
+  15: cat_ignore
+  16: dog_ignore
+  17: horse_ignore
+  18: sheep_ignore
+  19: cow_ignore
+  20: elephant_ignore
+  21: bear_ignore
+  22: zebra_ignore
+  23: giraffe_ignore
+  24: backpack_ignore
+  25: umbrella_ignore
+  26: handbag_ignore
+  27: tie_ignore
+  28: suitcase_ignore
+  29: frisbee_ignore
+  30: skis_ignore
+  31: snowboard_ignore
+  32: sports ball_ignore
+  33: kite_ignore
+  34: baseball bat_ignore
+  35: baseball glove_ignore
+  36: skateboard_ignore
+  37: surfboard_ignore
+  38: tennis racket_ignore
+  39: bottle_ignore
+  40: wine glass_ignore
+  41: cup_ignore
+  42: fork_ignore
+  43: knife_ignore
+  44: spoon_ignore
+  45: bowl_ignore
+  46: banana_ignore
+  47: apple_ignore
+  48: sandwich_ignore
+  49: orange_ignore
+  50: broccoli_ignore
+  51: carrot_ignore
+  52: hot dog_ignore
+  53: pizza_ignore
+  54: donut_ignore
+  55: cake_ignore
+  56: chair_ignore
+  57: couch_ignore
+  58: potted plant_ignore
+  59: bed_ignore
+  60: dining table_ignore
+  61: toilet_ignore
+  62: tv_ignore
+  63: laptop_ignore
+  64: mouse_ignore
+  65: remote_ignore
+  66: keyboard_ignore
+  67: cell phone_ignore
+  68: microwave_ignore
+  69: oven_ignore
+  70: toaster_ignore
+  71: sink_ignore
+  72: refrigerator_ignore
+  73: book_ignore
+  74: clock_ignore
+  75: vase_ignore
+  76: scissors_ignore
+  77: teddy bear_ignore
+  78: hair drier_ignore
+  79: toothbrush_ignore

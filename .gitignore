@@ -1,0 +1,16 @@
+# 1. 실행 결과 및 가중치 파일 제외
+runs/
+*.pt
+*.onnx
+
+# 2. 대용량 미디어 및 압축 파일 제외
+*.mp4
+*.zip
+
+# 3. 데이터셋 및 라벨 폴더 전체 제외 (가장 확실한 방법)
+**/dreamace/
+**/My First Project.yolov8/
+**/Temp_ZeroShot_Dataset/
+
+# 4. 개별 JSON 파일 무시 (프로젝트 루트의 필요한 json은 제외하고 싶다면)
+*.json
