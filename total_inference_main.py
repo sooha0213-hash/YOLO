@@ -150,8 +150,8 @@ def main():
         # 1. 개선된 컴퓨터 비전 기반 벽면 방어형 동적 주행구역 & 차선 레이어 합성
         frame = process_road_and_lanes(frame)
 
-        # 2. YOLOv8n ONNX 객체 인식 전처리 (320x320 해상도 가속)
-        img_yolo = cv2.resize(frame, (320, 320))
+        # 2. YOLOv8n ONNX 객체 인식 전처리 (256x256 해상도 가속)
+        img_yolo = cv2.resize(frame, (256, 256))
         img_yolo = cv2.cvtColor(img_yolo, cv2.COLOR_BGR2RGB)
         img_yolo = img_yolo.astype(np.float32) / 255.0
         img_yolo = img_yolo.transpose(2, 0, 1)
@@ -171,10 +171,10 @@ def main():
             
             if confidence > 0.25 and class_id in target_classes:
                 cx, cy, w, h = pred[0:4]
-                x1 = int((cx - w / 2) * (w_orig / 320))
-                y1 = int((cy - h / 2) * (h_orig / 320))
+                x1 = int((cx - w / 2) * (w_orig / 256))
+                y1 = int((cy - h / 2) * (h_orig / 256))
                 
-                boxes.append([x1, y1, int(w * (w_orig / 320)), int(h * (h_orig / 320))])
+                boxes.append([x1, y1, int(w * (w_orig / 256)), int(h * (h_orig / 256))])
                 confidences.append(float(confidence))
                 class_ids.append(int(class_id))
 
@@ -206,7 +206,7 @@ def main():
         
         cv2.imshow("PM ADAS Hybrid Engine", frame)
         
-        key = cv2.waitKey(1) & 0xFFq
+        key = cv2.waitKey(1) & 0xFF
         if key == ord('q'): 
             print("👋 사용자가 'q'를 눌러 안전 종료합니다.")
             break
