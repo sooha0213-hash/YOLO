@@ -1,23 +1,22 @@
 import os
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
 
 import cv2
 import numpy as np
 import onnxruntime as ort
 import time
 from scipy.optimize import linear_sum_assignment
+from flask import Flask, Response
 
 # =========================
-# 설정값 (라즈베리파이 최적화)
+# 설정값 (PC / CPU 최적화)
 # =========================
-YOLO_SIZE = 256
-CONF_THRESHOLD = 0.25
+YOLO_SIZE = 320  # yolov8n.onnx가 320x320 고정 입력으로 export된 모델이라 이 값을 바꾸면 추론 오류 발생
+CONF_THRESHOLD = 0.20
 NMS_THRESHOLD = 0.45
-FRAME_SKIP = 2
+FRAME_SKIP = 1
 ENABLE_LANE = False
 
-cv2.setNumThreads(1)
+app = Flask(__name__)
 
 
 def bbox_iou(box1, box2):
@@ -25,9 +24,11 @@ def bbox_iou(box1, box2):
     y1 = max(box1[1], box2[1])
     x2 = min(box1[2], box2[2])
     y2 = min(box1[3], box2[3])
+
     inter_area = max(0, x2 - x1) * max(0, y2 - y1)
     box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
     box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
+
     return inter_area / float(box1_area + box2_area - inter_area + 1e-5)
 
 
@@ -90,12 +91,12 @@ class SimpleByteTracker:
         matches = []
         u_track = list(range(len(tracks)))
         u_det = list(range(len(dets)))
-
         for r, c in zip(row_ind, col_ind):
             if iou_matrix[r, c] >= thresh:
                 matches.append((r, c))
                 u_track.remove(r)
                 u_det.remove(c)
+
         return matches, u_track, u_det
 
 
@@ -111,7 +112,6 @@ def process_road_and_lanes(frame):
     channels = list(cv2.split(ycrcb))
     channels[0] = equalized_gray
     blur_frame = cv2.cvtColor(cv2.merge(channels), cv2.COLOR_YCrCb2BGR)
-
     blur = cv2.GaussianBlur(blur_frame, (5, 5), 0)
 
     edges_wall = cv2.Canny(equalized_gray, 40, 120)
@@ -134,19 +134,16 @@ def process_road_and_lanes(frame):
     cv2.fillPoly(roi_mask, [poly_points], 255)
 
     dynamic_road = cv2.bitwise_and(road_mask, roi_mask)
-
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
     dynamic_road = cv2.morphologyEx(dynamic_road, cv2.MORPH_CLOSE, kernel)
     dynamic_road = cv2.morphologyEx(dynamic_road, cv2.MORPH_OPEN, kernel)
 
     contours, _ = cv2.findContours(dynamic_road, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     final_road_mask = np.zeros_like(dynamic_road)
-
     if contours:
         largest_contour = max(contours, key=cv2.contourArea)
         if cv2.contourArea(largest_contour) > (h * w * 0.04):
             cv2.drawContours(final_road_mask, [largest_contour], -1, 255, -1)
-
     overlay[final_road_mask > 0] = [0, 255, 0]
 
     if ENABLE_LANE:
@@ -167,47 +164,19 @@ def process_road_and_lanes(frame):
     return cv2.addWeighted(frame, 1.0, overlay, 0.25, 0)
 
 
-def main():
-    print("1. 프로그램 시작됨...")
+fps_list = []
 
-    yolo_onnx = "./yolov8n.onnx"
 
-    cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
-    cap.set(cv2.CAP_PROP_FPS, 15)
-
-    if not cap.isOpened():
-        print("❌ 에러: 카메라를 열 수 없습니다.")
-        return
-    print("2. 카메라 로드 성공!")
-
-    opts = ort.SessionOptions()
-    opts.intra_op_num_threads = 2
-    opts.inter_op_num_threads = 1
-    opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-
-    try:
-        yolo_session = ort.InferenceSession(
-            yolo_onnx,
-            sess_options=opts,
-            providers=["CPUExecutionProvider"]
-        )
-        print("3. ONNX 모델 로드 완료!")
-    except Exception as e:
-        print(f"❌ ONNX 모델 로드 실패: {e}")
-        return
-
-    yolo_input_name = yolo_session.get_inputs()[0].name
-    print("🚀 메인 루프 시작!")
-
-    tracker = SimpleByteTracker(track_thresh=0.45, match_thresh=0.45)
-
+def generate_frames(cap, yolo_session, yolo_input_name, tracker):
     FOCAL_LENGTH = 500.0
-    REAL_HEIGHTS = {
-        "Person": 1.7,
-        "Rider": 1.6,
-        "Vehicle": 1.5
+    # 클래스별 세부 정보: {COCO class_id: (표시 이름, 실제 높이(m), 박스 색상 BGR)}
+    CLASS_INFO = {
+        0: ("Person", 1.7, (0, 0, 255)),
+        1: ("Bicycle", 1.6, (255, 0, 255)),
+        2: ("Car", 1.5, (255, 255, 0)),
+        3: ("Motorcycle", 1.6, (0, 165, 255)),
+        5: ("Bus", 3.0, (0, 255, 255)),
+        7: ("Truck", 2.5, (255, 128, 0)),
     }
 
     frame_count = 0
@@ -217,23 +186,28 @@ def main():
         start_time = time.time()
         ret, frame = cap.read()
 
+        # 변경 (영상 끝나면 처음으로 되돌아가기)
         if not ret:
-            print("❌ 프레임 읽기 실패로 종료합니다.")
-            break
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            continue
 
         frame_count += 1
         w_orig, h_orig = frame.shape[1], frame.shape[0]
-
         raw_frame = frame.copy()
         display_frame = process_road_and_lanes(raw_frame)
 
         if frame_count % FRAME_SKIP == 0:
-            # ★ INTER_NEAREST로 빠른 리사이즈
-            img_yolo = cv2.resize(raw_frame, (YOLO_SIZE, YOLO_SIZE),
-                                  interpolation=cv2.INTER_NEAREST)
+            # 레터박스 리사이즈: 종횡비를 유지한 채 정사각형 안에 맞추고 남는 자리는 회색 패딩으로 채움
+            # (기존의 단순 정사각형 리사이즈는 객체를 찌그러뜨려 인식률을 떨어뜨림)
+            scale = min(YOLO_SIZE / w_orig, YOLO_SIZE / h_orig)
+            new_w, new_h = int(round(w_orig * scale)), int(round(h_orig * scale))
+            resized = cv2.resize(raw_frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+            img_yolo = np.full((YOLO_SIZE, YOLO_SIZE, 3), 114, dtype=np.uint8)
+            pad_x, pad_y = (YOLO_SIZE - new_w) // 2, (YOLO_SIZE - new_h) // 2
+            img_yolo[pad_y:pad_y + new_h, pad_x:pad_x + new_w] = resized
             img_yolo = cv2.cvtColor(img_yolo, cv2.COLOR_BGR2RGB)
 
-            # ★ 전처리 한 줄로 합치기 (메모리 연속 보장)
             yolo_tensor = np.ascontiguousarray(
                 img_yolo.transpose(2, 0, 1)[np.newaxis]
             ).astype(np.float32) / 255.0
@@ -254,14 +228,15 @@ def main():
                 confidence = float(scores[class_id])
 
                 if class_id in target_classes:
-                    required_conf = 0.50 if class_id == 0 else 0.25
+                    required_conf = 0.40 if class_id == 0 else 0.20
                     if confidence > required_conf:
                         cx, cy, w, h = pred[0:4]
-                        x1 = int((cx - w / 2) * (w_orig / YOLO_SIZE))
-                        y1 = int((cy - h / 2) * (h_orig / YOLO_SIZE))
+                        # 패딩/스케일을 되돌려 원본 프레임 좌표로 변환
+                        x1 = int((cx - w / 2 - pad_x) / scale)
+                        y1 = int((cy - h / 2 - pad_y) / scale)
                         boxes.append([x1, y1,
-                                      int(w * (w_orig / YOLO_SIZE)),
-                                      int(h * (h_orig / YOLO_SIZE))])
+                                      int(w / scale),
+                                      int(h / scale)])
                         confidences.append(confidence)
                         class_ids.append(class_id)
 
@@ -273,7 +248,7 @@ def main():
                 if len(indices) > 0:
                     for i in indices.flatten():
                         x, y, w, h = boxes[i]
-                        if h < 30:
+                        if h < 20:
                             continue
                         tracker_inputs.append([x, y, w, h, confidences[i], class_ids[i]])
 
@@ -285,23 +260,19 @@ def main():
             cls_id = target.cls_id
             track_id = target.track_id
 
-            if cls_id == 0:
-                class_name, color = "Person", (0, 0, 255)
-            elif cls_id in [1, 3]:
-                class_name, color = "Rider", (255, 0, 255)
-            else:
-                class_name, color = "Vehicle", (255, 255, 0)
-
-            real_h = REAL_HEIGHTS.get(class_name, 1.5)
+            class_name, real_h, color = CLASS_INFO.get(cls_id, ("Unknown", 1.5, (200, 200, 200)))
             distance_text = f"{(real_h * FOCAL_LENGTH) / h_box:.1f}m" if h_box > 0 else "Unknown"
-
             label = f"[{track_id}] {class_name} | {distance_text}"
+
             cv2.rectangle(display_frame, (x1, y1), (x2, y2), color, 2)
             cv2.putText(display_frame, label, (x1, max(y1 - 5, 15)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
         elapsed_time = max(time.time() - start_time, 0.001)
-        fps = 1.0 / elapsed_time
+        fps_list.append(1.0 / elapsed_time)
+        if len(fps_list) > 30:
+            fps_list.pop(0)
+        fps = sum(fps_list) / len(fps_list)
 
         cv2.putText(display_frame, f"FPS: {fps:.1f}", (20, 40),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
@@ -309,15 +280,79 @@ def main():
                     f"SIZE: {YOLO_SIZE} | Skip: {FRAME_SKIP} | Lane: {ENABLE_LANE}",
                     (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
-        cv2.imshow("PM ADAS - RaspberryPi", display_frame)
+        # JPEG로 인코딩해서 스트리밍
+        _, buffer = cv2.imencode(".jpg", display_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        frame_bytes = buffer.tobytes()
+        yield (b"--frame\r\n"
+               b"Content-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n")
 
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            print("👋 종료합니다.")
-            break
 
-    cap.release()
-    cv2.destroyAllWindows()
-    print("🏁 정상 종료되었습니다.")
+# =========================
+# Flask 라우트
+# =========================
+cap = None
+yolo_session = None
+yolo_input_name = None
+tracker = None
+
+
+@app.route("/")
+def index():
+    return """
+    <html>
+    <head><title>PM ADAS - PC</title></head>
+    <body style="background:#000; text-align:center;">
+        <h2 style="color:white;">PM ADAS Live Stream</h2>
+        <img src="/video_feed" width="640">
+    </body>
+    </html>
+    """
+
+
+@app.route("/video_feed")
+def video_feed():
+    return Response(
+        generate_frames(cap, yolo_session, yolo_input_name, tracker),
+        mimetype="multipart/x-mixed-replace; boundary=frame"
+    )
+
+
+def main():
+    global cap, yolo_session, yolo_input_name, tracker
+
+    print("1. 프로그램 시작됨...")
+    yolo_onnx = "./yolov8n.onnx"
+    cap = cv2.VideoCapture("input_video.mp4")
+
+    if not cap.isOpened():
+        print("❌ 에러: 카메라를 열 수 없습니다.")
+        return
+    print("2. 카메라 로드 성공!")
+
+    # PC의 CPU 코어를 최대한 활용 (라즈베리파이 버전은 코어가 적어 스레드를 1~2개로 제한했었음)
+    cpu_count = os.cpu_count() or 4
+    opts = ort.SessionOptions()
+    opts.intra_op_num_threads = cpu_count
+    opts.inter_op_num_threads = 2
+    opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
+    try:
+        yolo_session = ort.InferenceSession(
+            yolo_onnx,
+            sess_options=opts,
+            providers=["CPUExecutionProvider"]
+        )
+        print("3. ONNX 모델 로드 완료!")
+    except Exception as e:
+        print(f"❌ ONNX 모델 로드 실패: {e}")
+        return
+
+    yolo_input_name = yolo_session.get_inputs()[0].name
+    tracker = SimpleByteTracker(track_thresh=0.45, match_thresh=0.45)
+
+    # macOS는 5000번 포트를 AirPlay 수신 기능이 기본으로 점유하고 있어서 5001번 사용
+    print("🚀 Flask 서버 시작! 브라우저에서 http://PC의IP:5001 접속 (같은 PC라면 http://localhost:5001)")
+    app.run(host="0.0.0.0", port=5001, threaded=False)
 
 
 if __name__ == "__main__":
