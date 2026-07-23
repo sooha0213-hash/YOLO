@@ -206,7 +206,7 @@ def main():
         
         cv2.imshow("PM ADAS Hybrid Engine", frame)
         
-        key = cv2.waitKey(1) & 0xFFq
+        key = cv2.waitKey(1) & 0xFF
         if key == ord('q'): 
             print("👋 사용자가 'q'를 눌러 안전 종료합니다.")
             break
