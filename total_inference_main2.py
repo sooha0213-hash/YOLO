@@ -292,12 +292,23 @@ def main():
             if cls_id == 0: 
                 class_name = "Person"
                 color = (0, 0, 255)
-            elif cls_id in [1, 3]: 
-                class_name = "Rider"
-                color = (255, 0, 255)
-            else: 
-                class_name = "Vehicle"
+            elif cls_id == 1: 
+                class_name = "Bicycle"
+                color = (0, 255, 255)
+            elif cls_id == 2:
+                class_name = "Car"
                 color = (255, 255, 0)
+            elif cls_id == 3:
+                class_name = "Motorcycle"
+                color = (255, 0, 255)
+            elif cls_id == 5:
+                class_name = "Bus"
+                color = (0, 255, 0)
+            elif cls_id == 7:
+                class_name = "Truck"
+                color = (255, 128, 0)
+            else: 
+                continue
                 
             real_h = REAL_HEIGHTS.get(class_name, 1.5)
             if h_box > 0:
